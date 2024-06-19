@@ -3,8 +3,6 @@ param(
     [String]$FullSenseFMTTxtFilePath
 )
 
-Get-SenseHttpClientLastResult -FullSenseFMTTxtFilePath $FullSenseFMTTxtFilePath
-
 function Get-SenseHttpClientLastResult {
     param(
         [Parameter(Mandatory = $true)]
@@ -78,3 +76,5 @@ function ConvertTo-SenseHttpClientResultObject {
     # Output the custom object
     return $customObject
 }
+
+Get-SenseHttpClientLastResult -FullSenseFMTTxtFilePath $FullSenseFMTTxtFilePath
