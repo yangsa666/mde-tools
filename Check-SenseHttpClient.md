@@ -3,6 +3,10 @@
 ## How to use this script
 **Step1**: Download this script to your computer: https://raw.githubusercontent.com/yangsa666/mde-tools/main/Check-SenseHttpClient.ps1
 
+> **NOTE**
+> 
+> If you're blocked by execution policy, you can change the execution policy via this PowerShell command `Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope CurrentUser`. This requires admin privilege. 
+
 **Step2**: Open Powershell to locate the folder where the script is.
 
 - For Windows, you can open Powershell directly. 
