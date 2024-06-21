@@ -261,20 +261,8 @@ function Check-Proxy {
     $hasTls = tshark -r $NetTracePath -Y "ip.addr == $($ProxyAddress) and http.proxy_connect_host contains $($Hostname) and tls"
     if ($hasTls.Length -gt 0) {
         Write-Host "TLS handshake found for $($Hostname) in $($ProxyAddress)" -ForegroundColor Green
-        # $hasAlert = $hasTls | Where-Object { $_ -match 'Alert' }
-        
-        # # Scenario: TLS Alert found in the proxy server. It could be in TLS issue
-        # if ($hasAlert.Length -gt 0) {
-        #     $alertMessage = (($hasAlert | Select-Object -Last 1) -split "Alert ")[1]
-        #     Write-Host "TLS connection has an issue: Alert found for Proxy $($ProxyAddress)" -ForegroundColor Red
-        #     $result = New-ResultObject -Status "Failed" -Value ($hasAlert | Select-Object -Last 1)  -Logging $alertMessage
-        #     return $result
-        # }
-
         $checkTlsResult = Check-TLS -IpAddress $ProxyAddress -Hostname $Hostname
         return $checkTlsResult
-        # Scenario: TLS handshake is good
-        # TBD
     }
     else {
         Write-Host "TLS handshake not found for Proxy $($ProxyAddress)" -ForegroundColor Red
@@ -286,7 +274,6 @@ function Check-Proxy {
 
 ## Direct connection
 if ($null -eq $ProxyAddress -or $ProxyAddress -eq "") {
-
     # 1. Check DNS
     Write-Host "Checking DNS for CnC" -ForegroundColor Yellow
     $checkDnsResult = Check-DNS -Hostname "winatp"
@@ -323,7 +310,7 @@ if ($null -eq $ProxyAddress -or $ProxyAddress -eq "") {
 ## Proxy connection
 if ($null -ne $ProxyAddress -and $ProxyAddress -ne "") {
     $ProxyIpAddress = $ProxyAddress
-
+    # 0. Check Proxy Address
     Write-Host "Checking Proxy Address: $($ProxyAddress)" -ForegroundColor Yellow
     if ((Is-IPv4Address -IpAddress $ProxyAddress) -eq $false) {
         Write-Host "Proxy Address is not an IP Address: $($ProxyAddress)" -ForegroundColor Yellow
@@ -336,7 +323,7 @@ if ($null -ne $ProxyAddress -and $ProxyAddress -ne "") {
         $ProxyIpAddress = $checkDnsResult.Value
     }
 
-    # 2. Check Proxy
+    # 2. Check Proxy with Check-TLS and Check-HTTP
     Write-Host "Checking Proxy" -ForegroundColor Yellow
     $checkProxyResult = Check-Proxy -ProxyAddress $ProxyIpAddress -Hostname "winatp"
     if ($checkProxyResult.Status -eq "Failed") {
