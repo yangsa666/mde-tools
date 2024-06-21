@@ -63,41 +63,12 @@ function Check-TCP {
     $hasTCPTransnsmission = $tcpConnection | Where-Object { $_ -match 'TCP Retransmission' }
     if ($hasTCPTransnsmission.Length -gt 2) {
         Write-Host "TCP retransmission found for $($IpAddress), count: $($hasTCPTransnsmission.Length)" -ForegroundColor Red
-        $result = New-ResultObject -Status "Failed" -Value $null -Logging "TCP retransmission found for $($IpAddress), count: $($hasTCPTransnsmission.Length)"
+        $result = New-ResultObject -Status "Failed" -Value $null -Logging "TCP retransmission found for $($IpAddress), count: $($hasTCPTransnsmission.Length). It could be blocked by a external firewall or NSG, or reset by the destination server."
         return $result
     }
 
     Write-Host "No TCP retransmission found for $($IpAddress)" -ForegroundColor Green
     $result = New-ResultObject -Status "Success" -Value $null -Logging "No TCP retransmission found for $($IpAddress)"
-    return $result
-
-}
-
-function Check-HTTP {
-    param (
-        [string]$IpAddress,
-        [string]$HttpResponseUri
-    )
-
-    $httpConnection = tshark -r $NetTracePath -Y "ip.addr == $($IpAddress) and http.response_for.uri contains $($HttpResponseUri)"
-    if ($null -eq $httpConnection) {
-        Write-Host "No HTTP Response found for $($HttpResponseUri):" -ForegroundColor Red
-        $result = New-ResultObject -Status "Failed" -Value $null -Logging "No HTTP Response found for $($HttpResponseUri)"
-        return $result
-    }
-
-    # Scenario: HTTP 200 OK response returned by the proxy server. Good connection.
-    $hasHTTP200 = $httpConnection | Where-Object { $_ -match '200 OK' }
-    if ($hasHTTP200.Length -gt 0) {
-        Write-Host "200 OK found for $($HttpResponseUri)" -ForegroundColor Red
-        $result = New-ResultObject -Status "Success" -Value ($hasHTTP200 | Select-Object -Last 1) -Logging "200 OK found for $($HttpResponseUri)"
-        return $result
-    }
-    
-    # Scenario: Invalid HTTP response returned by the proxy server. Needs to check the proxy server
-    $hasNonHTTP200 = $httpConnection | Where-Object { $_ -notmatch '200 OK' }
-    Write-Host "No 200 OK found for $($HttpResponseUri)" -ForegroundColor Red
-    $result = New-ResultObject -Status "Failed" -Value ($hasNonHTTP200 | Select-Object -Last 1) -Logging "No 200 OK found for $($HttpResponseUri)"
     return $result
 
 }
@@ -243,6 +214,76 @@ function Check-TLS {
     }
 }
 
+
+
+function Check-HTTP {
+    param (
+        [string]$IpAddress,
+        [string]$HttpResponseUri
+    )
+
+    $httpRquest = tshark -r $NetTracePath -Y "ip.addr == $($IpAddress) and http.request.uri contains $($HttpResponseUri)"
+    if ($null -eq $httpRquest) {
+        Write-Host "No HTTP Request found for $($HttpResponseUri):" -ForegroundColor Red
+        $result = New-ResultObject -Status "Failed" -Value "No request to the host" -Logging "No HTTP Request found for $($HttpResponseUri)"
+        return $result
+    }
+
+    $httpConnection = tshark -r $NetTracePath -Y "ip.addr == $($IpAddress) and http.response_for.uri contains $($HttpResponseUri)"
+    if ($null -eq $httpConnection) {
+        Write-Host "No HTTP Response found for $($HttpResponseUri):" -ForegroundColor Red
+        $result = New-ResultObject -Status "Failed" -Value $null -Logging "No HTTP Response found for $($HttpResponseUri)"
+        return $result
+    }
+
+    # Scenario: HTTP 200 OK response returned by the proxy server. Good connection.
+    $hasHTTP200 = $httpConnection | Where-Object { $_ -match '200 OK' }
+    if ($hasHTTP200.Length -gt 0) {
+        Write-Host "200 OK found for $($HttpResponseUri)" -ForegroundColor Red
+        $result = New-ResultObject -Status "Success" -Value ($hasHTTP200 | Select-Object -Last 1) -Logging "200 OK found for $($HttpResponseUri)"
+        return $result
+    }
+    
+    # Scenario: Invalid HTTP response returned by the proxy server. Needs to check the proxy server
+    $hasNonHTTP200 = $httpConnection | Where-Object { $_ -notmatch '200 OK' }
+    Write-Host "No 200 OK found for $($HttpResponseUri)" -ForegroundColor Red
+    $result = New-ResultObject -Status "Failed" -Value ($hasNonHTTP200 | Select-Object -Last 1) -Logging "No 200 OK found for $($HttpResponseUri)"
+    return $result
+
+}
+
+function Check-Proxy {
+    param (
+        [string]$ProxyAddress,
+        [string]$Hostname
+    )
+
+    $hasTls = tshark -r $NetTracePath -Y "ip.addr == $($ProxyAddress) and http.proxy_connect_host contains $($Hostname) and tls"
+    if ($hasTls.Length -gt 0) {
+        Write-Host "TLS handshake found for $($Hostname) in $($ProxyAddress)" -ForegroundColor Green
+        # $hasAlert = $hasTls | Where-Object { $_ -match 'Alert' }
+        
+        # # Scenario: TLS Alert found in the proxy server. It could be in TLS issue
+        # if ($hasAlert.Length -gt 0) {
+        #     $alertMessage = (($hasAlert | Select-Object -Last 1) -split "Alert ")[1]
+        #     Write-Host "TLS connection has an issue: Alert found for Proxy $($ProxyAddress)" -ForegroundColor Red
+        #     $result = New-ResultObject -Status "Failed" -Value ($hasAlert | Select-Object -Last 1)  -Logging $alertMessage
+        #     return $result
+        # }
+
+        $checkTlsResult = Check-TLS -IpAddress $ProxyAddress -Hostname $Hostname
+        return $checkTlsResult
+        # Scenario: TLS handshake is good
+        # TBD
+    }
+    else {
+        Write-Host "TLS handshake not found for Proxy $($ProxyAddress)" -ForegroundColor Red
+        $checkHttpResult = Check-HTTP -IpAddress $ProxyAddress -HttpResponseUri $Hostname
+        return $checkHttpResult
+    }
+}
+
+
 ## Direct connection
 if ($null -eq $ProxyAddress -or $ProxyAddress -eq "") {
 
@@ -295,24 +336,20 @@ if ($null -ne $ProxyAddress -and $ProxyAddress -ne "") {
         $ProxyIpAddress = $checkDnsResult.Value
     }
 
-    # 2. Check HTTP connection
-    Write-Host "Checking HTTP for Proxy" -ForegroundColor Yellow
-    $checkHttpResult = Check-HTTP -IpAddress $ProxyIpAddress -HttpResponseUri "winatp"
-    if ($checkHttpResult.Status -eq "Failed") {
-        Write-Host $checkHttpResult.Logging -ForegroundColor Red
-        return
-    }
-    if ($checkHttpResult.Status -eq "Success") {
-        Write-Host $checkHttpResult.Logging -ForegroundColor Green
-        return
-    }
+    # 2. Check Proxy
+    Write-Host "Checking Proxy" -ForegroundColor Yellow
+    $checkProxyResult = Check-Proxy -ProxyAddress $ProxyIpAddress -Hostname "winatp"
+    if ($checkProxyResult.Status -eq "Failed") {
+        Write-Host $checkProxyResult.Logging -ForegroundColor Red
+        if ($checkProxyResult.Value -eq "No request to the host") {
+            # 3. Check TCP connection
+            Write-Host "Checking TCP for Proxy $($ProxyIpAddress)" -ForegroundColor Yellow
+            $checkTcpResult = Check-TCP -IpAddress $ProxyIpAddress
 
-    # 3. Check TCP connection
-    Write-Host "Checking TCP for Proxy $($ProxyIpAddress)" -ForegroundColor Yellow
-    $checkTcpResult = Check-TCP -IpAddress $ProxyIpAddress
-
-    if ($checkTcpResult.Status -eq "Failed") {
-        Write-Host $checkTcpResult.Logging -ForegroundColor Red
-        return
+            if ($checkTcpResult.Status -eq "Failed") {
+                Write-Host $checkTcpResult.Logging -ForegroundColor Red
+                return
+            }
+        }
     }
 }
