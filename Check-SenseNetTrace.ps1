@@ -35,12 +35,14 @@ function Check-DNS {
     if ($dnsQueryResult -match "No such name") {
         Write-Host "DNS query result: No such name" -ForegroundColor Red
         $result = New-ResultObject -Status "Failed" -Value $null -Logging "DNS query result: No such name"
+        return $result
     }
 
     $dnsIpAddress = $dnsQueryResult -split "A " | Select-Object -Last 1
 
     Write-Host "IpAddress queryed for $($Hostname):" -ForegroundColor Yellow
     $result = New-ResultObject -Status "Success" -Value $dnsIpAddress -Logging "IpAddress queryed for $($Hostname): $($dnsIpAddress)"
+    return $result
 
 
 }
