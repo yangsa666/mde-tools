@@ -101,6 +101,10 @@ function Check-TLS {
         $SNI = (($hasClientHello | Select-Object -last 1) -split " ")[15]
         Write-Host "TLS handshake: Client Hello found for $($ipAddress)" -ForegroundColor Green
         Write-Host "TLS version: $($TlsVersion), SNI: $($SNI)" -ForegroundColor Yellow
+        $CipherSuites = tshark -r $NetTracePath -Y "tls.handshake.ciphersuites and ip.addr == $($ipAddress)" -Vx
+        $clientCipherSuites = $CipherSuites | Select-String -Pattern "Cipher Suite:" | ForEach-Object {($_.Line -replace "Cipher Suite: ", "").Trim() -replace "\s+", ""}
+        Write-Host "Client Cipher Suites:"
+        $clientCipherSuites
     } else {
         Write-Host "TLS handshake: Client Hello not found for $($ipAddress)" -ForegroundColor Red
     }
