@@ -25,7 +25,7 @@ function Check-DNS {
         [string]$Hostname
     )
 
-    $dnsQueryResult = tshark -r $NetTracePath -Y "dns" | Where-Object { $_ -match "$Hostname" } | Select-Object -Last 1
+    $dnsQueryResult = tshark -r $NetTracePath -Y "dns" | Where-Object { ($_ -match "$Hostname") -and ($_ -match "response") } | Select-Object -Last 1
     if ($null -eq $dnsQueryResult) {
         Write-Host "No DNS query found for $($Hostname):" -ForegroundColor Red
         $result = New-ResultObject -Status "Failed" -Value $null -Logging "No DNS query found for $($Hostname)"
@@ -38,10 +38,10 @@ function Check-DNS {
         return $result
     }
 
-    $dnsIpAddress = $dnsQueryResult -split "A " | Select-Object -Last 1
+    $resolvedIpAddress = $dnsQueryResult -split "A " | Select-Object -Last 1
 
-    Write-Host "IpAddress queryed for $($Hostname):" -ForegroundColor Yellow
-    $result = New-ResultObject -Status "Success" -Value $dnsIpAddress -Logging "IpAddress queryed for $($Hostname): $($dnsIpAddress)"
+    Write-Host "IpAddress queryed for $($Hostname): $($resolvedIpAddress)" -ForegroundColor Yellow
+    $result = New-ResultObject -Status "Success" -Value $resolvedIpAddress -Logging "IpAddress queryed for $($Hostname): $($resolvedIpAddress)"
     return $result
 
 
@@ -52,14 +52,16 @@ function Check-TCP {
         [string]$IpAddress
     )
     $tcpConnection = tshark -r $NetTracePath -Y "tcp and ip.addr == $($IpAddress)"
+    # Scenario: Windows Firewall or 3rd party network security app may block the connection
     if ($null -eq $tcpConnection) {
         Write-Host "No TCP connection found for $($IpAddress):" -ForegroundColor Red
-        $result = New-ResultObject -Status "Failed" -Value $null -Logging "No TCP connection found for $($IpAddress)"
+        $result = New-ResultObject -Status "Failed" -Value $null -Logging "No TCP connection found for $($IpAddress), maybe a firewall or 3rd party network app blocked the connection"
         return $result
     }
 
+    # Scenario: TCP retransmission may indicate network congestion or packet loss, it could be blocked by a external firewall or NSG. Or itwas reset by the server
     $hasTCPTransnsmission = $tcpConnection | Where-Object { $_ -match 'TCP Retransmission' }
-    if ($hasTCPTransnsmission.Length -gt 0) {
+    if ($hasTCPTransnsmission.Length -gt 2) {
         Write-Host "TCP retransmission found for $($IpAddress), count: $($hasTCPTransnsmission.Length)" -ForegroundColor Red
         $result = New-ResultObject -Status "Failed" -Value $null -Logging "TCP retransmission found for $($IpAddress), count: $($hasTCPTransnsmission.Length)"
         return $result
@@ -84,12 +86,19 @@ function Check-HTTP {
         return $result
     }
 
+    # Scenario: HTTP 200 OK response returned by the proxy server. Good connection.
     $hasHTTP200 = $httpConnection | Where-Object { $_ -match '200 OK' }
     if ($hasHTTP200.Length -gt 0) {
         Write-Host "200 OK found for $($HttpResponseUri)" -ForegroundColor Red
         $result = New-ResultObject -Status "Success" -Value ($hasHTTP200 | Select-Object -Last 1) -Logging "200 OK found for $($HttpResponseUri)"
         return $result
     }
+    
+    # Scenario: Invalid HTTP response returned by the proxy server. Needs to check the proxy server
+    $hasNonHTTP200 = $httpConnection | Where-Object { $_ -notmatch '200 OK' }
+    Write-Host "No 200 OK found for $($HttpResponseUri)" -ForegroundColor Red
+    $result = New-ResultObject -Status "Failed" -Value ($hasNonHTTP200 | Select-Object -Last 1) -Logging "No 200 OK found for $($HttpResponseUri)"
+    return $result
 
 }
 
@@ -115,7 +124,7 @@ function Check-TLS {
     }
     else {
         Write-Host "TLS handshake not found for $($IpAddress)" -ForegroundColor Red
-        $result = New-ResultObject -Status "Failed" -Value $null -Logging "No TLS handshake found for $($IpAddress)"
+        $result = New-ResultObject -Status "Failed" -Value 'No TLS handshake' -Logging "No TLS handshake found for $($IpAddress)"
         return $result
     }
 
@@ -126,7 +135,8 @@ function Check-TLS {
         Write-Host "TLS handshake: Client Hello found for $($IpAddress)" -ForegroundColor Green
         if (($TlsVersion -eq "v1.2") -or ($TlsVersion -eq "v1.3")) {
             $TlsVersionForeGroundColor = "Green"
-        } else {
+        }
+        else {
             $TlsVersionForeGroundColor = "Red"
         }
         Write-Host "TLS version: $($TlsVersion), SNI: $($SNI)" -ForegroundColor $TlsVersionForeGroundColor
@@ -177,7 +187,7 @@ function Check-TLS {
             Write-Host "To use group policy, configure SSL Cipher Suite Order under Computer Configuration > Administrative Templates > Network > SSL Configuration Settings with the priority list for all cipher suites you want enabled." -ForegroundColor Yellow
             Write-Host "To use PowerShell, see TLS cmdlets: https://learn.microsoft.com/en-us/powershell/module/tls/enable-tlsciphersuite?view=windowsserver2022-ps" -ForegroundColor Yellow
 
-            $result = New-ResultObject -Status "Failed" -Value $null -Logging "Client Hello does not contain supported cipher suites for $($IpAddress)"
+            $result = New-ResultObject -Status "Failed" -Value "Client CipherSuites not supported" -Logging "Client Hello does not contain supported cipher suites for $($IpAddress)"
             return $result
         }
     }
@@ -244,25 +254,27 @@ if ($null -eq $ProxyAddress -or $ProxyAddress -eq "") {
         return
     }
 
-    # 2. Check TLS handshake
-    Write-Host "Checking TLS for CnC" -ForegroundColor Yellow
-    $checkTlsResult = Check-TLS -IpAddress $checkDnsResult.Value -Hostname "winatp"
-    if ($checkTlsResult.Status -eq "Failed") {
-        Write-Host $checkTlsResult.Logging -ForegroundColor Red
-        return
-    }
-
+    # 2. Check TLS Succeeded handshake
+    $checkTlsResult = Check-TLS -IpAddress $checkDnsResult.Value
     if ($checkTlsResult.Status -eq "Success") {
         Write-Host $checkTlsResult.Logging -ForegroundColor Green
         return
     }
 
-    # 3. Check TCP connection
-    Write-Host "Checking TCP for CnC" -ForegroundColor Yellow
-    $checkTcpResult = Check-TCP -IpAddress $checkDnsResult.Value
+    if ($checkTlsResult.Status -eq "Failed") {
+        Write-Host $checkTlsResult.Logging -ForegroundColor Red
 
-    if ($checkTcpResult.Status -eq "Failed") {
-        Write-Host $checkTcpResult.Logging -ForegroundColor Red
+        # if No TLS handshake, check TCP connection
+        if ($checkTlsResult.Value -eq "No TLS handshake") {
+            # 3. Check TCP connection
+            Write-Host "Checking TCP for CnC" -ForegroundColor Yellow
+            $checkTcpResult = Check-TCP -IpAddress $checkDnsResult.Value
+
+            if ($checkTcpResult.Status -eq "Failed") {
+                Write-Host $checkTcpResult.Logging -ForegroundColor Red
+                return
+            }
+        }
         return
     }
 }
