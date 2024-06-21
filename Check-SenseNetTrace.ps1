@@ -121,15 +121,65 @@ function Check-TLS {
 
     $hasClientHello = $tlsHandshake | Where-Object { $_ -match 'Client Hello' }
     if ($hasClientHello.Length -gt 0) {
-        $TlsVersion = (($hasClientHello | Select-Object -last 1) -split " ")[10]
-        $SNI = (($hasClientHello | Select-Object -last 1) -split " ")[15]
+        $TlsVersion = ((($hasClientHello | Select-Object -last 1) -split "TLS")[1] -split " ")[0]
+        $SNI = (($hasClientHello | Select-Object -last 1) -split "SNI=")[1] -replace ".{1}$"
         Write-Host "TLS handshake: Client Hello found for $($IpAddress)" -ForegroundColor Green
-        Write-Host "TLS version: $($TlsVersion), SNI: $($SNI)" -ForegroundColor Yellow
+        if (($TlsVersion -eq "v1.2") -or ($TlsVersion -eq "v1.3")) {
+            $TlsVersionForeGroundColor = "Green"
+        } else {
+            $TlsVersionForeGroundColor = "Red"
+        }
+        Write-Host "TLS version: $($TlsVersion), SNI: $($SNI)" -ForegroundColor $TlsVersionForeGroundColor
         $CipherSuites = tshark -r $NetTracePath -Y "tls.handshake.ciphersuites and ip.addr == $($IpAddress)" -Vx
-        $clientCipherSuites = $CipherSuites | Select-String -Pattern "Cipher Suite:" | ForEach-Object { ($_.Line -replace "Cipher Suite: ", "").Trim() -replace "\s+", "" }
-        Write-Host "Client Cipher Suites:"
-        $clientCipherSuites
-        # TBD: Check if the cipher suites are supported
+        $clientCipherSuitesCountString = ($CipherSuites | Select-String -Pattern "Cipher Suite" | ForEach-Object { ($_.Line -replace "Cipher Suite: ", "").Trim() -replace "\s+", "" })[1]
+        # Use a regular expression to extract the number
+        $cipherSuitesNumber = [regex]::Match($clientCipherSuitesCountString, '\((\d+)suites\)').Groups[1].Value
+        $clientCipherSuites = $CipherSuites | Select-String -Pattern "Cipher Suite:" | ForEach-Object { ($_.Line -replace "Cipher Suite: ", "").Trim() -replace "\s+", "" } | Select-Object -Last $cipherSuitesNumber
+        $cleanedCipherSuites = $clientCipherSuites | ForEach-Object {
+            $_ -replace "\(0x[0-9a-fA-F]+\)", ""
+        }
+        
+        $supportedCipherSuites = @(
+            # TLS 1.3 (suites in server-preferred order)
+            "TLS_AES_256_GCM_SHA384",
+            "TLS_CHACHA20_POLY1305_SHA256",
+            "TLS_AES_128_GCM_SHA256",
+            # TLS 1.2 (suites in server-preferred order)
+            "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+            "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+            "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+            "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
+            "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256"
+        )
+        $hasSupportedCipherSuites = $false
+        $cleanedCipherSuites | ForEach-Object {
+            if ($supportedCipherSuites -eq $_) {
+                $hasSupportedCipherSuites = $true
+                Write-Host "Supported Cipher Suite: $($_)" -ForegroundColor Green
+            }
+        }
+        if ($hasSupportedCipherSuites -eq $false) {
+            Write-Host "TLS handshake: Client Hello does not contain supported cipher suites for $($IpAddress)" -ForegroundColor Red
+            Write-Host "Supported Cipher Suites:" -ForegroundColor Yellow
+            Write-Host "++++++++++++++++++++++++++++" -ForegroundColor Blue
+            $supportedCipherSuites | ForEach-Object {
+                Write-Host $_ -ForegroundColor Blue
+            }
+            Write-Host "++++++++++++++++++++++++++++" -ForegroundColor Blue
+            Write-Host "Client Cipher Suites:" -ForegroundColor Yellow
+            Write-Host "++++++++++++++++++++++++++++" -ForegroundColor Red
+            $cleanedCipherSuites | ForEach-Object {
+                Write-Host $_ -ForegroundColor Red
+            }
+            Write-Host "++++++++++++++++++++++++++++" -ForegroundColor Red
+
+            Write-Host "To add cipher suites, either deploy a group policy or use the TLS cmdlets:" -ForegroundColor Yellow
+            Write-Host "To use group policy, configure SSL Cipher Suite Order under Computer Configuration > Administrative Templates > Network > SSL Configuration Settings with the priority list for all cipher suites you want enabled." -ForegroundColor Yellow
+            Write-Host "To use PowerShell, see TLS cmdlets: https://learn.microsoft.com/en-us/powershell/module/tls/enable-tlsciphersuite?view=windowsserver2022-ps" -ForegroundColor Yellow
+
+            $result = New-ResultObject -Status "Failed" -Value $null -Logging "Client Hello does not contain supported cipher suites for $($IpAddress)"
+            return $result
+        }
     }
     else {
         Write-Host "TLS handshake: Client Hello not found for $($IpAddress)" -ForegroundColor Red
@@ -149,8 +199,9 @@ function Check-TLS {
     }
 
     if ($hasAlert.Length -gt 0) {
+        $alertMessage = (($hasAlert | Select-Object -Last 1) -split "Alert ")[1]
         Write-Host "TLS connection has an issue: Alert found for $($IpAddress)" -ForegroundColor Red
-        $result = New-ResultObject -Status "Failed" -Value ($hasAlert | Select-Object -Last 1)  -Logging "TLS connection has an issue: Alert found for $($IpAddress)"
+        $result = New-ResultObject -Status "Failed" -Value ($hasAlert | Select-Object -Last 1)  -Logging $alertMessage
         return $result
     }
 
@@ -193,16 +244,7 @@ if ($null -eq $ProxyAddress -or $ProxyAddress -eq "") {
         return
     }
 
-    # 2. Check TCP connection
-    Write-Host "Checking TCP for CnC" -ForegroundColor Yellow
-    $checkTcpResult = Check-TCP -IpAddress $checkDnsResult.Value
-
-    if ($checkTcpResult.Status -eq "Failed") {
-        Write-Host $checkTcpResult.Logging -ForegroundColor Red
-        return
-    }
-
-    # 3. Check TLS handshake
+    # 2. Check TLS handshake
     Write-Host "Checking TLS for CnC" -ForegroundColor Yellow
     $checkTlsResult = Check-TLS -IpAddress $checkDnsResult.Value -Hostname "winatp"
     if ($checkTlsResult.Status -eq "Failed") {
@@ -215,6 +257,14 @@ if ($null -eq $ProxyAddress -or $ProxyAddress -eq "") {
         return
     }
 
+    # 3. Check TCP connection
+    Write-Host "Checking TCP for CnC" -ForegroundColor Yellow
+    $checkTcpResult = Check-TCP -IpAddress $checkDnsResult.Value
+
+    if ($checkTcpResult.Status -eq "Failed") {
+        Write-Host $checkTcpResult.Logging -ForegroundColor Red
+        return
+    }
 }
 
 ## Proxy connection
@@ -233,16 +283,7 @@ if ($null -ne $ProxyAddress -and $ProxyAddress -ne "") {
         $ProxyIpAddress = $checkDnsResult.Value
     }
 
-    # 2. Check TCP connection
-    Write-Host "Checking TCP for Proxy $($ProxyIpAddress)" -ForegroundColor Yellow
-    $checkTcpResult = Check-TCP -IpAddress $ProxyIpAddress
-
-    if ($checkTcpResult.Status -eq "Failed") {
-        Write-Host $checkTcpResult.Logging -ForegroundColor Red
-        return
-    }
-
-    # 3. Check HTTP connection
+    # 2. Check HTTP connection
     Write-Host "Checking HTTP for Proxy" -ForegroundColor Yellow
     $checkHttpResult = Check-HTTP -IpAddress $ProxyIpAddress -HttpResponseUri "winatp"
     if ($checkHttpResult.Status -eq "Failed") {
@@ -251,6 +292,15 @@ if ($null -ne $ProxyAddress -and $ProxyAddress -ne "") {
     }
     if ($checkHttpResult.Status -eq "Success") {
         Write-Host $checkHttpResult.Logging -ForegroundColor Green
+        return
+    }
+
+    # 3. Check TCP connection
+    Write-Host "Checking TCP for Proxy $($ProxyIpAddress)" -ForegroundColor Yellow
+    $checkTcpResult = Check-TCP -IpAddress $ProxyIpAddress
+
+    if ($checkTcpResult.Status -eq "Failed") {
+        Write-Host $checkTcpResult.Logging -ForegroundColor Red
         return
     }
 }
