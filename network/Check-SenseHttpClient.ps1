@@ -11,9 +11,21 @@ function Get-SenseHttpClientLastResult {
 
 # Read all lines from the text file
 $lines = Get-Content -Path $FullSenseFMTTxtFilePath
-
 # Filter lines that contain the string "SenseHttpClient"
-$matchingLines = $lines | Where-Object { $_ -match "SenseHttpClient" } | Select-Object -Last 5
+$senseHttpClientLines = $lines | Where-Object { $_ -match "SenseHttpClient" }
+# Filter CnC request lines
+$cncLines = $senseHttpClientLines | Where-Object {$_ -match "HttpClient created" -and $_ -match "cnc"}
+if ($cncLines.Length -eq 0) {
+    Write-Host "No CNC lines found in the log file." -ForegroundColor Yellow
+    return
+}
+
+Write-Host "CNC request lines found in the log file." -ForegroundColor Yellow
+$lastCncRequest = $cncLines | Select-Object -Last 1
+$indexOfLastCncRequest = $senseHttpClientLines.IndexOf($lastCncRequest)
+
+# Get the 5 lines after the last CNC request and result
+$matchingLines = $senseHttpClientLines[$indexOfLastCncRequest..($indexOfLastCncRequest + 5)]
 
 # Output the matching lines
 Write-Host "Last SenseHttpClient Logging:"  -ForegroundColor Yellow
