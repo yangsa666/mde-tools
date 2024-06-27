@@ -182,6 +182,11 @@ function Check-TLS {
     if ($hasAlert.Length -gt 0) {
         $alertMessage = (($hasAlert | Select-Object -Last 1) -split "Alert ")[1]
         Write-Host "TLS connection has an issue: Alert found for $($IpAddress)" -ForegroundColor Red
+        # Scenario: SSL inspection or SSL cert issue, Unknown CA error in the TLS alert
+        if ($alertMessage -match "Unknown CA") {
+            $alertMessage = "Unknown CA alert. Please check if the proxy server has enabled SSL inspection and disable/bypass SSL inspection for MDE endpoints." + $alertMessage
+        }
+        
         $result = New-ResultObject -Status "Failed" -Value ($hasAlert | Select-Object -Last 1)  -Logging $alertMessage
         return $result
     }
