@@ -281,6 +281,7 @@ if (-not (Test-Path $NetTracePath)) {
     return
 }
 
+# Convert .etl to .pcapng file if the input file is an ETL file
 if ($NetTracePath -match ".etl") {
     Write-Host "The file $($NetTracePath) is an ETL file. Converting it to a pcap file." -ForegroundColor Yellow
     .\etl2pcapng.exe $NetTracePath $NetTracePath.Replace(".etl", ".pcapng")
