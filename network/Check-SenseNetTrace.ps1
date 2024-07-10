@@ -140,7 +140,7 @@ function Check-TLS {
             }
         }
         if ($hasSupportedCipherSuites -eq $false) {
-            Write-Host "TLS handshake: Client Hello does not contain supported cipher suites for $($IpAddress)" -ForegroundColor Red
+            Write-Host "TLS handshake: Client Hello does not contain supported cipher suites for remote server $($IpAddress)" -ForegroundColor Red
             Write-Host "Supported Cipher Suites:" -ForegroundColor Yellow
             Write-Host "++++++++++++++++++++++++++++" -ForegroundColor Blue
             $supportedCipherSuites | ForEach-Object {
@@ -158,7 +158,7 @@ function Check-TLS {
             Write-Host "To use group policy, configure SSL Cipher Suite Order under Computer Configuration > Administrative Templates > Network > SSL Configuration Settings with the priority list for all cipher suites you want enabled." -ForegroundColor Yellow
             Write-Host "To use PowerShell, see TLS cmdlets: https://learn.microsoft.com/en-us/powershell/module/tls/enable-tlsciphersuite?view=windowsserver2022-ps" -ForegroundColor Yellow
 
-            $result = New-ResultObject -Status "Failed" -Value "Client CipherSuites not supported" -Logging "Client Hello does not contain supported cipher suites for $($IpAddress)"
+            $result = New-ResultObject -Status "Failed" -Value "Client CipherSuites not supported" -Logging "Client Hello does not contain supported cipher suites for remote server $($IpAddress)"
             return $result
         }
     }
