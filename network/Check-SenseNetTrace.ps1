@@ -276,6 +276,17 @@ function Check-Proxy {
     }
 }
 
+if (-not (Test-Path $NetTracePath)) {
+    Write-Host "The file $($NetTracePath) does not exist." -ForegroundColor Red
+    return
+}
+
+if ($NetTracePath -match ".etl") {
+    Write-Host "The file $($NetTracePath) is an ETL file. Converting it to a pcap file." -ForegroundColor Yellow
+    .\etl2pcapng.exe $NetTracePath $NetTracePath.Replace(".etl", ".pcapng")
+    Write-Host "The ETL file has been converted to a pcap file: $($NetTracePath.Replace(".etl", ".pcapng"))" -ForegroundColor Green
+    $NetTracePath = $NetTracePath.Replace(".etl", ".pcapng")
+}
 
 ## Direct connection
 if ($null -eq $ProxyAddress -or $ProxyAddress -eq "") {
