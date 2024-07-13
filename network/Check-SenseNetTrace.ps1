@@ -2,7 +2,9 @@ param (
     [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
     [string]$NetTracePath,
     [Parameter(Mandatory = $false, Position = 1, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
-    [string]$ProxyAddress
+    [string]$ProxyAddress,
+    [Parameter(Mandatory = $false, Position = 2, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+    [string]$FullSenseFMTTxtFilePath
 )
 
 function New-ResultObject {
@@ -289,8 +291,42 @@ if ($NetTracePath -match ".etl") {
     $NetTracePath = $NetTracePath.Replace(".etl", ".pcapng")
 }
 
-## Direct connection
-if ($null -eq $ProxyAddress -or $ProxyAddress -eq "") {
+function Check-ProxyConnection{
+    Write-Host "Checking Proxy Connection" -ForegroundColor Yellow
+    $ProxyIpAddress = $ProxyAddress
+    # 0. Check Proxy Address
+    Write-Host "Checking Proxy Address: $($ProxyAddress)" -ForegroundColor Yellow
+    if ((Is-IPv4Address -IpAddress $ProxyAddress) -eq $false) {
+        Write-Host "Proxy Address is not an IP Address: $($ProxyAddress)" -ForegroundColor Yellow
+        # 1. Check DNS
+        $checkDnsResult = Check-DNS -Hostname $ProxyAddress
+        if ($checkDnsResult.Status -eq "Failed") {
+            Write-Host $checkDnsResult.Logging -ForegroundColor Red
+            return
+        }
+        $ProxyIpAddress = $checkDnsResult.Value
+    }
+
+    # 2. Check Proxy with Check-TLS and Check-HTTP
+    Write-Host "Checking Proxy" -ForegroundColor Yellow
+    $checkProxyResult = Check-Proxy -ProxyAddress $ProxyIpAddress -Hostname "winatp"
+    if ($checkProxyResult.Status -eq "Failed") {
+        Write-Host $checkProxyResult.Logging -ForegroundColor Red
+        if ($checkProxyResult.Value -eq "No request to the host") {
+            # 3. Check TCP connection
+            Write-Host "Checking TCP for Proxy $($ProxyIpAddress)" -ForegroundColor Yellow
+            $checkTcpResult = Check-TCP -IpAddress $ProxyIpAddress
+
+            if ($checkTcpResult.Status -eq "Failed") {
+                Write-Host $checkTcpResult.Logging -ForegroundColor Red
+                return
+            }
+        }
+    }
+}
+
+function Check-DirectConnection {
+    Write-Host "Checking Direct Connection" -ForegroundColor Yellow
     # 1. Check DNS
     Write-Host "Checking DNS for CnC" -ForegroundColor Yellow
     $checkDnsResult = Check-DNS -Hostname "winatp"
@@ -324,36 +360,23 @@ if ($null -eq $ProxyAddress -or $ProxyAddress -eq "") {
     }
 }
 
+if ($FullSenseFMTTxtFilePath) {
+    Write-Host "Full Sense FMT txt file is provided, checking proxy configuration" -ForegroundColor Yellow
+    $proxyUrl = .\Check-SenseHttpClient.ps1 -FullSenseFMTTxtFilePath $FullSenseFMTTxtFilePath -GetProxySetting
+    Write-Host "Proxy proxyUrl:" -ForegroundColor Yellow
+    Write-Host $proxyUrl -ForegroundColor Yellow
+    if (($proxyUrl -ne "") -or ($null -ne $proxyUrl)) {
+        $ProxyAddress = ($proxyUrl -split ":")[0]
+    }
+}
+
 ## Proxy connection
 if ($null -ne $ProxyAddress -and $ProxyAddress -ne "") {
-    $ProxyIpAddress = $ProxyAddress
-    # 0. Check Proxy Address
-    Write-Host "Checking Proxy Address: $($ProxyAddress)" -ForegroundColor Yellow
-    if ((Is-IPv4Address -IpAddress $ProxyAddress) -eq $false) {
-        Write-Host "Proxy Address is not an IP Address: $($ProxyAddress)" -ForegroundColor Yellow
-        # 1. Check DNS
-        $checkDnsResult = Check-DNS -Hostname $ProxyAddress
-        if ($checkDnsResult.Status -eq "Failed") {
-            Write-Host $checkDnsResult.Logging -ForegroundColor Red
-            return
-        }
-        $ProxyIpAddress = $checkDnsResult.Value
-    }
+    Check-ProxyConnection
+    Check-DirectConnection
+}
 
-    # 2. Check Proxy with Check-TLS and Check-HTTP
-    Write-Host "Checking Proxy" -ForegroundColor Yellow
-    $checkProxyResult = Check-Proxy -ProxyAddress $ProxyIpAddress -Hostname "winatp"
-    if ($checkProxyResult.Status -eq "Failed") {
-        Write-Host $checkProxyResult.Logging -ForegroundColor Red
-        if ($checkProxyResult.Value -eq "No request to the host") {
-            # 3. Check TCP connection
-            Write-Host "Checking TCP for Proxy $($ProxyIpAddress)" -ForegroundColor Yellow
-            $checkTcpResult = Check-TCP -IpAddress $ProxyIpAddress
-
-            if ($checkTcpResult.Status -eq "Failed") {
-                Write-Host $checkTcpResult.Logging -ForegroundColor Red
-                return
-            }
-        }
-    }
+## Direct connection
+if ($null -eq $ProxyAddress -or $ProxyAddress -eq "") {
+    Check-DirectConnection
 }

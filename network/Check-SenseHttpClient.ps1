@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
-    [String]$FullSenseFMTTxtFilePath
+    [String]$FullSenseFMTTxtFilePath,
+    [Switch]$GetProxySetting
 )
 
 function Get-SenseHttpClientLastResult {
@@ -121,6 +122,39 @@ function ConvertTo-SenseHttpClientResultObject {
 
     # Output the custom object
     return $customObject
+}
+
+function Get-ProxySetting {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]$FullSenseFMTTxtFilePath
+    )
+
+    # Read all lines from the text file
+    $lines = Get-Content -Path $FullSenseFMTTxtFilePath
+    # Filter lines that contain the string "SenseHttpClient"
+    $senseHttpClientLines = $lines | Where-Object { $_ -match "SenseHttpClient" }
+    # Filter CnC request lines
+    $cncLines = $senseHttpClientLines | Where-Object { $_ -match "HttpClient created" -and $_ -match "cnc" }
+    if ($cncLines.Length -eq 0) {
+        Write-Host "No CNC lines found in the log file." -ForegroundColor Yellow
+        return
+    }
+    $lastCncRequest = $cncLines | Select-Object -Last 1
+    $indexOfLastCncRequest = $senseHttpClientLines.IndexOf($lastCncRequest)
+
+    # Get the 5 lines after the last CNC request and result
+    $matchingLines = $senseHttpClientLines[$indexOfLastCncRequest..($indexOfLastCncRequest + 5)]
+    $proxyLine = $matchingLines | Where-Object { $_ -match "proxy parameters" }
+    $proxySettingString = ($proxyLine -split "proxy parameters, ")[1]
+    $proxySetting = ConvertTo-SenseHttpClientResultObject -SenseHttpClientResult $proxySettingString
+    return $proxySetting.ProxyURL
+
+}
+
+if ($GetProxySetting) {
+    $result = Get-ProxySetting -FullSenseFMTTxtFilePath $FullSenseFMTTxtFilePath
+    return $result
 }
 
 Get-SenseHttpClientLastResult -FullSenseFMTTxtFilePath $FullSenseFMTTxtFilePath
