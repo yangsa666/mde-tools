@@ -42,7 +42,7 @@ function Check-DNS {
 
     $resolvedIpAddress = $dnsQueryResult -split "A " | Select-Object -Last 1
 
-    Write-Host "IpAddress queryed for $($Hostname): $($resolvedIpAddress)" -ForegroundColor Yellow
+    Write-Host "IpAddress queryed for $($Hostname): $($resolvedIpAddress)" -ForegroundColor Green
     $result = New-ResultObject -Status "Success" -Value $resolvedIpAddress -Logging "IpAddress queryed for $($Hostname): $($resolvedIpAddress)"
     return $result
 
@@ -57,7 +57,7 @@ function Check-TCP {
     # Scenario: Windows Firewall or 3rd party network security app may block the connection
     if ($null -eq $tcpConnection) {
         Write-Host "No TCP connection found for $($IpAddress):" -ForegroundColor Red
-        $result = New-ResultObject -Status "Failed" -Value $null -Logging "No TCP connection found for $($IpAddress), maybe a firewall or 3rd party network app blocked the connection"
+        $result = New-ResultObject -Status "Failed" -Value $null -Logging "No TCP connection found for $($IpAddress), maybe Windows Firewall or 3rd party network app blocked the connection"
         return $result
     }
 
@@ -264,15 +264,15 @@ function Check-Proxy {
         [string]$ProxyAddress,
         [string]$Hostname
     )
-
+    Write-Host "Checking TLS with CnC" -ForegroundColor Green
     $hasTls = tshark -r $NetTracePath -Y "ip.addr == $($ProxyAddress) and http.proxy_connect_host contains $($Hostname) and tls"
     if ($hasTls.Length -gt 0) {
-        Write-Host "TLS handshake found for $($Hostname) in $($ProxyAddress)" -ForegroundColor Green
+        Write-Host "TLS handshake found with $($Hostname) in $($ProxyAddress)" -ForegroundColor Green
         $checkTlsResult = Check-TLS -IpAddress $ProxyAddress -Hostname $Hostname
         return $checkTlsResult
     }
     else {
-        Write-Host "TLS handshake not found for Proxy $($ProxyAddress)" -ForegroundColor Red
+        Write-Host "TLS handshake not found with Proxy $($ProxyAddress)" -ForegroundColor Red
         $checkHttpResult = Check-HTTP -IpAddress $ProxyAddress -HttpResponseUri $Hostname
         return $checkHttpResult
     }
@@ -292,12 +292,15 @@ if ($NetTracePath -match ".etl") {
 }
 
 function Check-ProxyConnection{
-    Write-Host "Checking Proxy Connection" -ForegroundColor Yellow
+    Write-Host " "
+    Write-Host "+---------------------------+" -ForegroundColor Green
+    Write-Host "| Checking Proxy Connection |" -ForegroundColor Green
+    Write-Host "+---------------------------+" -ForegroundColor Green
     $ProxyIpAddress = $ProxyAddress
     # 0. Check Proxy Address
-    Write-Host "Checking Proxy Address: $($ProxyAddress)" -ForegroundColor Yellow
+    Write-Host "Checking Proxy Address: $($ProxyAddress)" -ForegroundColor Green
     if ((Is-IPv4Address -IpAddress $ProxyAddress) -eq $false) {
-        Write-Host "Proxy Address is not an IP Address: $($ProxyAddress)" -ForegroundColor Yellow
+        Write-Host "Proxy Address is not an IP Address: $($ProxyAddress)" -ForegroundColor Green
         # 1. Check DNS
         $checkDnsResult = Check-DNS -Hostname $ProxyAddress
         if ($checkDnsResult.Status -eq "Failed") {
@@ -308,13 +311,13 @@ function Check-ProxyConnection{
     }
 
     # 2. Check Proxy with Check-TLS and Check-HTTP
-    Write-Host "Checking Proxy" -ForegroundColor Yellow
+    Write-Host "Checking Proxy" -ForegroundColor Green
     $checkProxyResult = Check-Proxy -ProxyAddress $ProxyIpAddress -Hostname "winatp"
     if ($checkProxyResult.Status -eq "Failed") {
         Write-Host $checkProxyResult.Logging -ForegroundColor Red
         if ($checkProxyResult.Value -eq "No request to the host") {
             # 3. Check TCP connection
-            Write-Host "Checking TCP for Proxy $($ProxyIpAddress)" -ForegroundColor Yellow
+            Write-Host "Checking TCP for Proxy $($ProxyIpAddress)" -ForegroundColor Green
             $checkTcpResult = Check-TCP -IpAddress $ProxyIpAddress
 
             if ($checkTcpResult.Status -eq "Failed") {
@@ -326,9 +329,12 @@ function Check-ProxyConnection{
 }
 
 function Check-DirectConnection {
-    Write-Host "Checking Direct Connection" -ForegroundColor Yellow
+    Write-Host " "
+    Write-Host "+----------------------------+" -ForegroundColor Green
+    Write-Host "| Checking Direct Connection |" -ForegroundColor Green
+    Write-Host "+----------------------------+" -ForegroundColor Green
     # 1. Check DNS
-    Write-Host "Checking DNS for CnC" -ForegroundColor Yellow
+    Write-Host "Checking DNS for CnC" -ForegroundColor Green
     $checkDnsResult = Check-DNS -Hostname "winatp"
     if ($checkDnsResult.Status -eq "Failed") {
         Write-Host $checkDnsResult.Logging -ForegroundColor Red
@@ -348,7 +354,7 @@ function Check-DirectConnection {
         # if No TLS handshake, check TCP connection
         if ($checkTlsResult.Value -eq "No TLS handshake") {
             # 3. Check TCP connection
-            Write-Host "Checking TCP for CnC" -ForegroundColor Yellow
+            Write-Host "Checking TCP for CnC" -ForegroundColor Green
             $checkTcpResult = Check-TCP -IpAddress $checkDnsResult.Value
 
             if ($checkTcpResult.Status -eq "Failed") {
@@ -361,10 +367,9 @@ function Check-DirectConnection {
 }
 
 if ($FullSenseFMTTxtFilePath) {
-    Write-Host "Full Sense FMT txt file is provided, checking proxy configuration" -ForegroundColor Yellow
+    Write-Host "Full Sense FMT txt file is provided, checking proxy configuration" -ForegroundColor Green
     $proxyUrl = .\Check-SenseHttpClient.ps1 -FullSenseFMTTxtFilePath $FullSenseFMTTxtFilePath -GetProxySetting
-    Write-Host "Proxy proxyUrl:" -ForegroundColor Yellow
-    Write-Host $proxyUrl -ForegroundColor Yellow
+    Write-Host "Proxy proxyUrl: " $proxyUrl -ForegroundColor Green
     if (($proxyUrl -ne "") -or ($null -ne $proxyUrl)) {
         $ProxyAddress = ($proxyUrl -split ":")[0]
     }
