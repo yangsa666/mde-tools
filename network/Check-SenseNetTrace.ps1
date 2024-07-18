@@ -28,8 +28,16 @@ function Check-DNS {
     param (
         [string]$Hostname
     )
+    try {
+        $dnsQueryResult = tshark -r $NetTracePath -Y "dns" | Where-Object { ($_ -match "$Hostname") -and ($_ -match "response") } | Select-Object -Last 1
+    } catch {
+        $result = New-ResultObject -Status "Failed" -Value $null -Logging $_.Exception.Message
+        Write-Host "Oops... It's not able to invoke tshark to run. 
+Please ensure you have installed Wireshark and added its folder into the PATH environment variable. See the error message below." -ForegroundColor Red
+        Write-Host "==============" -ForegroundColor Red
+        return $result
+    }
 
-    $dnsQueryResult = tshark -r $NetTracePath -Y "dns" | Where-Object { ($_ -match "$Hostname") -and ($_ -match "response") } | Select-Object -Last 1
     if ($null -eq $dnsQueryResult) {
         $result = New-ResultObject -Status "Failed" -Value $null -Logging "DNS: No DNS query found for $($Hostname)"
         return $result
