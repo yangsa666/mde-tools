@@ -18,13 +18,22 @@
 
 - For Mac, you need to install Powershell first, please refer to this doc for installation: https://docs.microsoft.com/en-us/powershell/scripting/install/installing-powershell-core-on-macos?view=powershell-7
 
-**Step3**: Run `.\Check-SenseNetTrace.ps1 -NetTracePath "{path_of_your_nettrace.pcapng}" -ProxyAddress "{the_proxy_address}"`
+**Step3**: Run `.\Check-SenseNetTrace.ps1 -NetTracePath "{path_of_your_nettrace.etl/pcapng}" -ProxyAddress "{the_proxy_address}"`
 
 **For example**: 
 ## Has proxy configured
-`.\Check-SenseNetTrace.ps1 -NetTracePath "C:\Temp\NetTrace.pcapng" -ProxyAddress "10.0.0.101"`
+`.\Check-SenseNetTrace.ps1 -NetTracePath "C:\Temp\NetTrace.etl/pcapng" -ProxyAddress "10.0.0.101"`
 
-`.\Check-SenseNetTrace.ps1 -NetTracePath "C:\Temp\NetTrace.pcapng" -ProxyAddress "proxy.domain.local"`
+`.\Check-SenseNetTrace.ps1 -NetTracePath "C:\Temp\NetTrace.etl/pcapng" -ProxyAddress "proxy.domain.local"`
 
 ## Direct connection without proxy
-`.\Check-SenseNetTrace.ps1 -NetTracePath "C:\Temp\NetTrace.pcapng"`
+`.\Check-SenseNetTrace.ps1 -NetTracePath "C:\Temp\NetTrace.etl/pcapng"`
+
+## With streamlined mode
+`.\Check-SenseNetTrace.ps1 -NetTracePath "C:\Temp\NetTrace.etl/pcapng" -Streamlined`
+
+## Check Cyberdata channel connection
+`.\Check-SenseNetTrace.ps1 -NetTracePath "C:\Temp\NetTrace.etl/pcapng" -CyberData`
+
+## Combine the FullSenseETLText to detect proxy automatically
+`.\Check-SenseNetTrace.ps1 -NetTracePath "C:\Temp\NetTrace.etl/pcapng" -FullSenseFMTTxtFilePath ${the_file_path_of_FullSenseFMTTxtFile}`
